@@ -17,5 +17,11 @@ yarn-debug.log*
 .DS_Store
 Thumbs.db
 
+# Database lockfiles & local sqlite files
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # Keep uploaded default media assets, ignore temp files
 server/uploads/*_preview.png
+

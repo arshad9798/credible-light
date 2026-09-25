@@ -1,12 +1,22 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dbPath = path.join(__dirname, 'database.sqlite');
+
+// Clean up any stale cross-platform WAL/SHM lock files to prevent startup SIGABRT errors
+try {
+  if (fs.existsSync(`${dbPath}-shm`)) fs.unlinkSync(`${dbPath}-shm`);
+  if (fs.existsSync(`${dbPath}-wal`)) fs.unlinkSync(`${dbPath}-wal`);
+} catch (e) {
+  // ignore
+}
+
 const db = new Database(dbPath);
 
 // Enable foreign keys and WAL mode for high performance

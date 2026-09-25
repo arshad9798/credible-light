@@ -1,0 +1,13 @@
+{
+  "name": "credible-light",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Credible Light – Premium Signage & Interior Solutions Web Application",
+  "scripts": {
+    "build": "npm --prefix server install && npm --prefix client install && npm --prefix client run build",
+    "start": "node server/server.js",
+    "server": "node server/server.js",
+    "client": "npm --prefix client run dev",
+    "install:all": "npm --prefix server install && npm --prefix client install"
+  }
+}

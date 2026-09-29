@@ -93,13 +93,32 @@ export const api = {
     setAuthUser(null);
   },
   getMe: () => request('/auth/me'),
+  updateCredentials: async (data) => {
+    const res = await request('/admin/credentials', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+    if (res.token) {
+      setAuthToken(res.token);
+    }
+    if (res.user) {
+      setAuthUser(res.user);
+    }
+    return res;
+  },
 
   // Admin Dashboard
   getStats: () => request('/admin/dashboard/stats'),
 
   // Admin Enquiries
   getEnquiries: (params = {}) => {
-    const q = new URLSearchParams(params).toString();
+    const cleanParams = {};
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '' && v !== 'All') {
+        cleanParams[k] = v;
+      }
+    });
+    const q = new URLSearchParams(cleanParams).toString();
     return request(`/admin/enquiries${q ? `?${q}` : ''}`);
   },
   updateEnquiry: (id, data) => request(`/admin/enquiries/${id}`, {
@@ -120,8 +139,11 @@ export const api = {
   updateProject: (id, data) => request(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id) => request(`/admin/projects/${id}`, { method: 'DELETE' }),
 
-  // Categories
+  // Categories CRUD
   getCategoriesAdmin: () => request('/admin/categories'),
+  createCategory: (data) => request('/admin/categories', { method: 'POST', body: JSON.stringify(data) }),
+  updateCategory: (id, data) => request(`/admin/categories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCategory: (id) => request(`/admin/categories/${id}`, { method: 'DELETE' }),
 
   // Testimonials
   getTestimonialsAdmin: () => request('/admin/testimonials'),

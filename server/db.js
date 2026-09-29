@@ -228,6 +228,13 @@ export function initDatabase() {
     );
   `);
 
+  // Migration: Add images column if not present
+  try {
+    db.exec('ALTER TABLE projects ADD COLUMN images TEXT');
+  } catch (e) {
+    // column already exists
+  }
+
   seedInitialData();
 }
 

@@ -49,13 +49,19 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
   const [selectedEnquiry, setSelectedEnquiry] = useState(null);
   const [enquiryStatusFilter, setEnquiryStatusFilter] = useState('All');
   const [enquirySearch, setEnquirySearch] = useState('');
+  const [isLoadingLeads, setIsLoadingLeads] = useState(false);
+  const [lastLeadsRefresh, setLastLeadsRefresh] = useState(new Date());
 
   const [services, setServices] = useState([]);
   const [editingService, setEditingService] = useState(null);
 
   const [projects, setProjects] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [projectSubView, setProjectSubView] = useState('projects'); // 'projects' or 'categories'
   const [editingProject, setEditingProject] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [uploadingProjectPhoto, setUploadingProjectPhoto] = useState(false);
+  const [newProjectImageUrl, setNewProjectImageUrl] = useState('');
 
   const [beforeAfter, setBeforeAfter] = useState([]);
   const [editingBA, setEditingBA] = useState(null);
@@ -87,10 +93,43 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
     }
   }, [token]);
 
+  // Tab change handler that automatically syncs and re-fetches latest data for that tab
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    if (tabId === 'enquiries') {
+      loadEnquiries(enquiryStatusFilter, enquirySearch);
+      loadStats();
+    } else if (tabId === 'dashboard') {
+      loadStats();
+      loadEnquiries(enquiryStatusFilter, enquirySearch);
+      loadCustomOrders();
+    } else if (tabId === 'projects') {
+      loadProjects();
+    } else if (tabId === 'customOrders') {
+      loadCustomOrders();
+    } else if (tabId === 'services') {
+      loadServices();
+    }
+  };
+
+  // Live Auto-Refresh polling (every 12 seconds) so new enquiries always show up
+  useEffect(() => {
+    if (!token) return;
+    const timer = setInterval(() => {
+      loadStats();
+      if (activeTab === 'enquiries') {
+        loadEnquiries(enquiryStatusFilter, enquirySearch, false);
+      } else if (activeTab === 'customOrders') {
+        loadCustomOrders();
+      }
+    }, 12000);
+    return () => clearInterval(timer);
+  }, [token, activeTab, enquiryStatusFilter, enquirySearch]);
+
   const loadCustomOrders = async () => {
     try {
       const res = await api.getCustomOrdersAdmin();
-      setCustomOrders(res.data);
+      setCustomOrders(res.data || []);
     } catch (e) {
       console.error(e);
     }
@@ -105,15 +144,19 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
     }
   };
 
-  const loadEnquiries = async () => {
+  const loadEnquiries = async (status = enquiryStatusFilter, search = enquirySearch, showSpinner = true) => {
     try {
+      if (showSpinner) setIsLoadingLeads(true);
       const res = await api.getEnquiries({
-        status: enquiryStatusFilter !== 'All' ? enquiryStatusFilter : undefined,
-        search: enquirySearch || undefined
+        status: status !== 'All' ? status : undefined,
+        search: (search && search.trim()) ? search.trim() : undefined
       });
-      setEnquiries(res.data);
+      setEnquiries(res.data || []);
+      setLastLeadsRefresh(new Date());
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load enquiries:', e);
+    } finally {
+      if (showSpinner) setIsLoadingLeads(false);
     }
   };
 
@@ -129,9 +172,9 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
   const loadProjects = async () => {
     try {
       const res = await api.getProjectsAdmin();
-      setProjects(res.data);
+      setProjects(res.data || []);
       const catRes = await api.getCategoriesAdmin();
-      setCategories(catRes.data);
+      setCategories(catRes.data || []);
     } catch (e) {
       console.error(e);
     }
@@ -390,7 +433,7 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => handleTabChange(item.id)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -554,7 +597,7 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
                   Recent Customer Inquiries
                 </h3>
                 <button
-                  onClick={() => setActiveTab('enquiries')}
+                  onClick={() => handleTabChange('enquiries')}
                   style={{ background: 'none', border: 'none', color: 'var(--gold-primary)', fontWeight: 600, fontSize: '0.86rem', cursor: 'pointer' }}
                 >
                   View All Leads →
@@ -799,183 +842,328 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
         {/* TAB 2: LEADS CRM */}
         {activeTab === 'enquiries' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+            {/* Leads CRM Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
               <div>
-                <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff' }}>
-                  Customer Leads CRM
-                </h2>
-                <p style={{ color: '#888', fontSize: '0.9rem' }}>
-                  Filter, manage statuses, view photos, and message customers on WhatsApp
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                    Customer Leads CRM
+                  </h2>
+                  <span
+                    style={{
+                      backgroundColor: 'rgba(229, 169, 60, 0.2)',
+                      color: 'var(--gold-primary)',
+                      border: '1px solid var(--border-gold)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      padding: '3px 10px',
+                      borderRadius: 'var(--radius-full)'
+                    }}
+                  >
+                    {enquiries.length} Total
+                  </span>
+                </div>
+                <p style={{ color: '#888', fontSize: '0.88rem', marginTop: '4px' }}>
+                  Real-time customer enquiries, quote requests, and instant WhatsApp follow-ups
                 </p>
               </div>
 
-              {/* Status Filters */}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {['All', 'New', 'Contacted', 'Quotation Sent', 'Follow-up', 'Converted', 'Closed'].map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => {
-                      setEnquiryStatusFilter(st);
-                      setTimeout(loadEnquiries, 50);
-                    }}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: 'var(--radius-full)',
-                      border: enquiryStatusFilter === st ? '1px solid var(--gold-primary)' : '1px solid rgba(255,255,255,0.1)',
-                      backgroundColor: enquiryStatusFilter === st ? 'var(--gold-primary)' : 'rgba(255,255,255,0.05)',
-                      color: enquiryStatusFilter === st ? '#050505' : '#AAA',
-                      fontWeight: 600,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {st}
-                  </button>
-                ))}
+              {/* Refresh Action */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '0.78rem', color: '#777' }}>
+                  Auto-sync active • Last refreshed {lastLeadsRefresh ? lastLeadsRefresh.toLocaleTimeString() : 'now'}
+                </span>
+                <button
+                  onClick={() => {
+                    loadEnquiries(enquiryStatusFilter, enquirySearch);
+                    loadStats();
+                    onShowToast && onShowToast('Leads refreshed successfully!', 'success');
+                  }}
+                  className="btn-outline-gold"
+                  disabled={isLoadingLeads}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '0.85rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Clock size={15} />
+                  <span>{isLoadingLeads ? 'Refreshing...' : 'Refresh Leads'}</span>
+                </button>
               </div>
             </div>
 
-            {/* Enquiries Grid / List */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
-              {enquiries.map((enq) => (
-                <div
-                  key={enq.id}
-                  className="card-glass"
-                  style={{
-                    padding: '22px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: '#121212',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between'
+            {/* Filter and Search Bar Row */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '14px',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                marginBottom: '24px',
+                padding: '16px',
+                backgroundColor: '#121212',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.06)'
+              }}
+            >
+              {/* Search input */}
+              <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
+                <Search size={16} color="#888" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                <input
+                  type="text"
+                  placeholder="Search leads by customer name, phone, city, service..."
+                  value={enquirySearch}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEnquirySearch(val);
+                    loadEnquiries(enquiryStatusFilter, val, false);
                   }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                      <div>
-                        <h4 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFF' }}>
-                          {enq.customer_name}
-                        </h4>
-                        <div style={{ fontSize: '0.82rem', color: '#888' }}>
-                          📍 {enq.city_location || 'Not specified'} • ⏱️ {new Date(enq.created_at).toLocaleDateString()}
-                        </div>
-                      </div>
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px 9px 36px',
+                    backgroundColor: '#1A1A1A',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#FFF',
+                    borderRadius: '8px',
+                    fontSize: '0.86rem'
+                  }}
+                />
+                {enquirySearch && (
+                  <button
+                    onClick={() => {
+                      setEnquirySearch('');
+                      loadEnquiries(enquiryStatusFilter, '', true);
+                    }}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
 
-                      {/* Status Dropdown */}
-                      <select
-                        value={enq.status}
-                        onChange={async (e) => {
-                          const newStatus = e.target.value;
-                          await api.updateEnquiry(enq.id, { status: newStatus });
-                          loadEnquiries();
-                          loadStats();
-                          onShowToast && onShowToast(`Lead status updated to ${newStatus}`, 'success');
-                        }}
-                        style={{
-                          padding: '5px 10px',
-                          borderRadius: '6px',
-                          backgroundColor: '#1F1F1F',
-                          border: '1px solid var(--border-gold)',
-                          color: 'var(--gold-primary)',
-                          fontSize: '0.8rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          outline: 'none'
-                        }}
-                      >
-                        {['New', 'Contacted', 'Quotation Sent', 'Follow-up', 'Converted', 'Closed'].map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px', marginBottom: '14px' }}>
-                      <div style={{ fontSize: '0.85rem', color: '#DDD', marginBottom: '4px' }}>
-                        🏷️ <strong>Service:</strong> {enq.service_name}
-                      </div>
-                      {enq.approx_size && (
-                        <div style={{ fontSize: '0.85rem', color: '#DDD', marginBottom: '4px' }}>
-                          📏 <strong>Approx Size:</strong> {enq.approx_size}
-                        </div>
-                      )}
-                      {enq.requirement_details && (
-                        <div style={{ fontSize: '0.85rem', color: '#AAA', fontStyle: 'italic', marginTop: '6px' }}>
-                          "{enq.requirement_details}"
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Uploaded Customer Photo Thumbnail */}
-                    {enq.uploaded_photo_url && (
-                      <div style={{ marginBottom: '14px' }}>
-                        <span style={{ fontSize: '0.78rem', color: '#888', display: 'block', marginBottom: '4px' }}>
-                          Uploaded Site Photo:
-                        </span>
-                        <a href={enq.uploaded_photo_url} target="_blank" rel="noopener noreferrer">
-                          <img
-                            src={enq.uploaded_photo_url}
-                            alt="Site Photo"
-                            style={{
-                              width: '100%',
-                              maxHeight: '140px',
-                              objectFit: 'cover',
-                              borderRadius: '8px',
-                              border: '1px solid rgba(255,255,255,0.1)'
-                            }}
-                          />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: '10px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    <a
-                      href={`https://wa.me/${(enq.whatsapp || enq.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                        `Hi ${enq.customer_name}, this is Credible Light regarding your quotation for ${enq.service_name}. Here is our estimate...`
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-whatsapp"
-                      style={{ flex: 1, padding: '8px 12px', fontSize: '0.85rem' }}
-                    >
-                      <MessageCircle size={16} />
-                      <span>WhatsApp Reply</span>
-                    </a>
-
-                    <a
-                      href={`tel:${enq.phone.replace(/[^0-9+]/g, '')}`}
-                      className="btn-secondary"
-                      style={{ padding: '8px 14px', fontSize: '0.85rem' }}
-                    >
-                      <Phone size={15} />
-                    </a>
-
+              {/* Status Filter Buttons */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {['All', 'New', 'Contacted', 'Quotation Sent', 'Follow-up', 'Converted', 'Closed'].map((st) => {
+                  const isSelected = enquiryStatusFilter === st;
+                  return (
                     <button
-                      onClick={async () => {
-                        if (window.confirm(`Delete lead from ${enq.customer_name}?`)) {
-                          await api.deleteEnquiry(enq.id);
-                          loadEnquiries();
-                          loadStats();
-                          onShowToast && onShowToast('Enquiry deleted', 'success');
-                        }
+                      key={st}
+                      onClick={() => {
+                        setEnquiryStatusFilter(st);
+                        loadEnquiries(st, enquirySearch, true);
                       }}
                       style={{
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        color: '#EF4444',
-                        padding: '8px 12px',
+                        padding: '6px 13px',
                         borderRadius: 'var(--radius-full)',
-                        cursor: 'pointer'
+                        border: isSelected ? '1px solid var(--gold-primary)' : '1px solid rgba(255,255,255,0.1)',
+                        backgroundColor: isSelected ? 'var(--gold-primary)' : 'rgba(255,255,255,0.05)',
+                        color: isSelected ? '#050505' : '#AAA',
+                        fontWeight: 700,
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
                       }}
                     >
-                      <Trash2 size={16} />
+                      {st}
                     </button>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Enquiries Grid or Helpful Empty State */}
+            {enquiries.length === 0 ? (
+              <div
+                style={{
+                  padding: '50px 20px',
+                  textAlign: 'center',
+                  backgroundColor: '#121212',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255,255,255,0.08)'
+                }}
+              >
+                <Users size={44} color="#555" style={{ margin: '0 auto 12px' }} />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#DDD', marginBottom: '8px' }}>
+                  No Enquiries Found
+                </h3>
+                <p style={{ color: '#888', fontSize: '0.9rem', maxWidth: '440px', margin: '0 auto 18px' }}>
+                  {enquirySearch || enquiryStatusFilter !== 'All'
+                    ? `No leads matched filter '${enquiryStatusFilter}' ${enquirySearch ? `and query '${enquirySearch}'` : ''}.`
+                    : 'Customer quotation requests submitted from the website will appear here in real time.'}
+                </p>
+                {(enquirySearch || enquiryStatusFilter !== 'All') && (
+                  <button
+                    onClick={() => {
+                      setEnquiryStatusFilter('All');
+                      setEnquirySearch('');
+                      loadEnquiries('All', '', true);
+                    }}
+                    className="btn-outline-gold"
+                    style={{ padding: '8px 18px', fontSize: '0.86rem' }}
+                  >
+                    Clear Filter & Show All
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
+                {enquiries.map((enq) => (
+                  <div
+                    key={enq.id}
+                    className="card-glass"
+                    style={{
+                      padding: '22px',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: '#121212',
+                      border: enq.status === 'New' ? '1px solid var(--border-gold)' : '1px solid rgba(255,255,255,0.08)',
+                      boxShadow: enq.status === 'New' ? '0 0 15px rgba(229, 169, 60, 0.15)' : 'none',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div>
+                      {/* Customer Name, Status, Date Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#FFF', margin: 0 }}>
+                              {enq.customer_name}
+                            </h4>
+                            {enq.status === 'New' && (
+                              <span style={{ fontSize: '0.68rem', backgroundColor: '#3B82F6', color: '#fff', fontWeight: 800, padding: '2px 7px', borderRadius: 'var(--radius-full)' }}>
+                                NEW LEAD
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '4px' }}>
+                            📍 {enq.city_location || 'Local Customer'} • ⏱️ {new Date(enq.created_at).toLocaleDateString()} {new Date(enq.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+
+                        {/* Status Dropdown */}
+                        <select
+                          value={enq.status}
+                          onChange={async (e) => {
+                            const newStatus = e.target.value;
+                            await api.updateEnquiry(enq.id, { status: newStatus });
+                            loadEnquiries(enquiryStatusFilter, enquirySearch, false);
+                            loadStats();
+                            onShowToast && onShowToast(`Lead #${enq.id} status updated to ${newStatus}`, 'success');
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            backgroundColor: '#1F1F1F',
+                            border: '1px solid var(--border-gold)',
+                            color: 'var(--gold-primary)',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          {['New', 'Contacted', 'Quotation Sent', 'Follow-up', 'Converted', 'Closed'].map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Service & Requirements Details Box */}
+                      <div style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '14px', borderRadius: '8px', marginBottom: '14px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                        <div style={{ fontSize: '0.88rem', color: '#FFF', marginBottom: '6px' }}>
+                          🏷️ <strong style={{ color: 'var(--gold-primary)' }}>Service:</strong> {enq.service_name}
+                        </div>
+                        {enq.approx_size && (
+                          <div style={{ fontSize: '0.85rem', color: '#DDD', marginBottom: '6px' }}>
+                            📏 <strong>Approx Size:</strong> {enq.approx_size}
+                          </div>
+                        )}
+                        {enq.requirement_details && (
+                          <div style={{ fontSize: '0.84rem', color: '#AAA', fontStyle: 'italic', marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--gold-primary)' }}>
+                            "{enq.requirement_details}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Uploaded Customer Site Photo */}
+                      {enq.uploaded_photo_url && (
+                        <div style={{ marginBottom: '14px' }}>
+                          <span style={{ fontSize: '0.78rem', color: '#888', display: 'block', marginBottom: '4px' }}>
+                            📷 Customer Attached Site Photo:
+                          </span>
+                          <a href={enq.uploaded_photo_url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={enq.uploaded_photo_url}
+                              alt="Customer Site Photo"
+                              style={{
+                                width: '100%',
+                                maxHeight: '150px',
+                                objectFit: 'cover',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255,255,255,0.1)'
+                              }}
+                            />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons: WhatsApp, Call, Delete */}
+                    <div style={{ display: 'flex', gap: '8px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <a
+                        href={`https://wa.me/${(enq.whatsapp || enq.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                          `Hi ${enq.customer_name}! This is Credible Light following up on your quote request for ${enq.service_name}. Here is our estimate and design preview...`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-whatsapp"
+                        style={{ flex: 1, padding: '9px 12px', fontSize: '0.85rem', textDecoration: 'none' }}
+                      >
+                        <MessageCircle size={16} />
+                        <span>WhatsApp Reply</span>
+                      </a>
+
+                      <a
+                        href={`tel:${enq.phone.replace(/[^0-9+]/g, '')}`}
+                        className="btn-secondary"
+                        style={{ padding: '9px 14px', fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title={`Call ${enq.phone}`}
+                      >
+                        <Phone size={15} />
+                      </a>
+
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`Delete lead from ${enq.customer_name}?`)) {
+                            await api.deleteEnquiry(enq.id);
+                            loadEnquiries(enquiryStatusFilter, enquirySearch, false);
+                            loadStats();
+                            onShowToast && onShowToast('Enquiry deleted', 'success');
+                          }
+                        }}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          color: '#EF4444',
+                          padding: '9px 12px',
+                          borderRadius: 'var(--radius-full)',
+                          cursor: 'pointer'
+                        }}
+                        title="Delete Lead"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1183,110 +1371,598 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
           </div>
         )}
 
-        {/* TAB 4: PORTFOLIO PROJECTS */}
+        {/* TAB 4: PORTFOLIO PROJECTS & DYNAMIC CATEGORIES */}
         {activeTab === 'projects' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            {/* Header with Sub-View Switcher */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
               <div>
-                <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff' }}>
-                  Portfolio Projects
+                <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  Portfolio CMS & Dynamic Categories
                 </h2>
-                <p style={{ color: '#888', fontSize: '0.9rem' }}>
-                  Manage gallery items, categories, and showcase real project installations
+                <p style={{ color: '#888', fontSize: '0.9rem', marginTop: '4px' }}>
+                  Manage gallery projects, multi-image 1s auto-slideshows, and dynamic filter categories
                 </p>
               </div>
 
-              <button
-                onClick={() => setEditingProject({
-                  title: '',
-                  category_id: 1,
-                  category_name: 'Shop Sign Boards',
-                  location: 'Jamshedpur',
-                  short_description: '',
-                  cover_image: '/uploads/portfolio_spice_hub.jpg',
-                  is_featured: 1,
-                  project_date: '2026'
-                })}
-                className="btn-primary"
-                style={{ padding: '10px 20px', fontSize: '0.9rem' }}
-              >
-                <Plus size={18} />
-                <span>Add Project</span>
-              </button>
-            </div>
-
-            {/* Projects Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-              {projects.map((proj) => (
+              {/* Sub-View Switcher & Add Button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <div
-                  key={proj.id}
                   style={{
-                    backgroundColor: '#121212',
-                    borderRadius: '12px',
-                    overflow: 'hidden',
+                    display: 'flex',
+                    backgroundColor: '#161616',
+                    padding: '4px',
+                    borderRadius: '10px',
                     border: '1px solid rgba(255,255,255,0.08)'
                   }}
                 >
-                  <div style={{ width: '100%', aspectRatio: '16/10', position: 'relative' }}>
-                    <img src={proj.cover_image} alt={proj.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  </div>
-                  <div style={{ padding: '16px' }}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--gold-primary)', fontWeight: 700 }}>
-                      {proj.category_name}
-                    </div>
-                    <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff', margin: '4px 0' }}>
-                      {proj.title}
-                    </h4>
-                    <p style={{ fontSize: '0.8rem', color: '#888', marginBottom: '14px' }}>
-                      📍 {proj.location || 'Local site'}
-                    </p>
+                  <button
+                    onClick={() => setProjectSubView('projects')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: projectSubView === 'projects' ? 'var(--gold-primary)' : 'transparent',
+                      color: projectSubView === 'projects' ? '#000' : '#AAA',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <Briefcase size={16} />
+                    <span>Projects ({projects.length})</span>
+                  </button>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button
-                        onClick={() => setEditingProject(proj)}
-                        style={{
-                          background: 'rgba(229, 169, 60, 0.1)',
-                          border: '1px solid var(--border-gold)',
-                          color: 'var(--gold-primary)',
-                          padding: '6px 12px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '0.8rem'
-                        }}
-                      >
-                        <Edit2 size={13} /> Edit
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          if (window.confirm(`Delete project '${proj.title}'?`)) {
-                            await api.deleteProject(proj.id);
-                            loadProjects();
-                            onDataRefresh && onDataRefresh();
-                            onShowToast && onShowToast('Project deleted', 'success');
-                          }
-                        }}
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.1)',
-                          border: '1px solid rgba(239, 68, 68, 0.3)',
-                          color: '#EF4444',
-                          padding: '6px 10px',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => setProjectSubView('categories')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: projectSubView === 'categories' ? 'var(--gold-primary)' : 'transparent',
+                      color: projectSubView === 'categories' ? '#000' : '#AAA',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <Layers size={16} />
+                    <span>Categories ({categories.length})</span>
+                  </button>
                 </div>
-              ))}
+
+                {projectSubView === 'projects' ? (
+                  <button
+                    onClick={() => {
+                      const firstCat = categories.find(c => c.slug !== 'all') || categories[0] || { id: 1, name: 'Shop Sign Boards' };
+                      setEditingProject({
+                        title: '',
+                        category_id: firstCat.id,
+                        category_name: firstCat.name,
+                        location: 'Jamshedpur',
+                        short_description: '',
+                        cover_image: '/uploads/portfolio_spice_hub.jpg',
+                        images: ['/uploads/portfolio_spice_hub.jpg'],
+                        is_featured: 1,
+                        project_date: '2026',
+                        display_order: projects.length + 1
+                      });
+                      setNewProjectImageUrl('');
+                    }}
+                    className="btn-primary"
+                    style={{ padding: '10px 18px', fontSize: '0.88rem' }}
+                  >
+                    <Plus size={17} />
+                    <span>Add Project</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setEditingCategory({
+                      name: '',
+                      slug: '',
+                      display_order: categories.length + 1
+                    })}
+                    className="btn-primary"
+                    style={{ padding: '10px 18px', fontSize: '0.88rem' }}
+                  >
+                    <Plus size={17} />
+                    <span>Add Category</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Project Edit Modal */}
+            {/* SUB-VIEW 1: DYNAMIC CATEGORIES MANAGER */}
+            {projectSubView === 'categories' && (
+              <div>
+                {/* Info banner */}
+                <div
+                  style={{
+                    backgroundColor: 'rgba(229, 169, 60, 0.08)',
+                    border: '1px solid var(--border-gold)',
+                    borderRadius: '12px',
+                    padding: '16px 20px',
+                    marginBottom: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(229,169,60,0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--gold-primary)'
+                      }}
+                    >
+                      <Layers size={18} />
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', fontSize: '0.96rem', margin: 0, fontWeight: 700 }}>
+                        Live Dynamic Categories
+                      </h4>
+                      <p style={{ color: '#aaa', fontSize: '0.82rem', margin: '2px 0 0 0' }}>
+                        Any category added or edited here instantly appears on the live website's portfolio filter buttons.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span style={{ fontSize: '0.78rem', color: '#10B981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }} />
+                    Live Website Sync Active
+                  </span>
+                </div>
+
+                {/* Categories Table / Card Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '18px' }}>
+                  {categories.map((cat) => {
+                    const isAll = cat.slug === 'all';
+                    return (
+                      <div
+                        key={cat.id || cat.slug}
+                        className="card-glass"
+                        style={{
+                          backgroundColor: '#121212',
+                          borderRadius: '12px',
+                          padding: '20px',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '14px'
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
+                                color: 'var(--gold-primary)',
+                                backgroundColor: 'rgba(229,169,60,0.12)',
+                                border: '1px solid var(--border-gold)',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontWeight: 700
+                              }}
+                            >
+                              Order #{cat.display_order ?? 0}
+                            </span>
+
+                            <span
+                              style={{
+                                fontSize: '0.75rem',
+                                color: '#9CA3AF',
+                                backgroundColor: 'rgba(255,255,255,0.05)',
+                                padding: '3px 8px',
+                                borderRadius: 'var(--radius-full)'
+                              }}
+                            >
+                              {cat.project_count || 0} Projects
+                            </span>
+                          </div>
+
+                          <h3 style={{ fontSize: '1.18rem', fontWeight: 800, color: '#fff', margin: '0 0 6px 0' }}>
+                            {cat.name}
+                          </h3>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: '#888' }}>
+                            <span>Slug:</span>
+                            <code style={{ color: 'var(--gold-primary)', backgroundColor: '#1A1A1A', padding: '2px 6px', borderRadius: '4px' }}>
+                              {cat.slug}
+                            </code>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                          <button
+                            onClick={() => setEditingCategory({ ...cat })}
+                            style={{
+                              background: 'rgba(229, 169, 60, 0.1)',
+                              border: '1px solid var(--border-gold)',
+                              color: 'var(--gold-primary)',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600
+                            }}
+                          >
+                            <Edit2 size={13} /> Edit
+                          </button>
+
+                          {!isAll && (
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Delete category "${cat.name}"? Projects under this category will need reassignment.`)) {
+                                  try {
+                                    await api.deleteCategory(cat.id);
+                                    await loadProjects();
+                                    onDataRefresh && onDataRefresh();
+                                    onShowToast && onShowToast(`Category "${cat.name}" deleted successfully`, 'success');
+                                  } catch (err) {
+                                    onShowToast && onShowToast(err.message || 'Failed to delete category', 'error');
+                                  }
+                                }
+                              }}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#EF4444',
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer'
+                              }}
+                              title="Delete Category"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 2: PROJECTS GALLERY */}
+            {projectSubView === 'projects' && (
+              <div>
+                {/* 1-Sec Auto Slideshow Notice */}
+                <div
+                  style={{
+                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    borderRadius: '12px',
+                    padding: '14px 20px',
+                    marginBottom: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}
+                >
+                  <span style={{ fontSize: '1.2rem' }}>✨</span>
+                  <div style={{ fontSize: '0.85rem', color: '#D1FAE5', lineHeight: 1.5 }}>
+                    <strong>1-Second Auto-Slideshow Active:</strong> When you add 4 (or multiple) images to any project card, the live website displays them inside a single card and automatically scrolls through them every 1 second!
+                  </div>
+                </div>
+
+                {/* Projects Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '22px' }}>
+                  {projects.map((proj) => {
+                    const imgList = Array.isArray(proj.images) && proj.images.length > 0
+                      ? proj.images
+                      : (proj.cover_image ? [proj.cover_image] : []);
+
+                    return (
+                      <div
+                        key={proj.id}
+                        style={{
+                          backgroundColor: '#121212',
+                          borderRadius: '14px',
+                          overflow: 'hidden',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        {/* Image Preview Container */}
+                        <div style={{ width: '100%', aspectRatio: '16/10', position: 'relative', backgroundColor: '#000' }}>
+                          <img
+                            src={proj.cover_image || (imgList[0]) || '/uploads/portfolio_spice_hub.jpg'}
+                            alt={proj.title}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+
+                          {/* Multi-Photo Count Badge */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '10px',
+                              right: '10px',
+                              zIndex: 3,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              color: '#fff',
+                              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                              backdropFilter: 'blur(6px)',
+                              padding: '4px 10px',
+                              borderRadius: 'var(--radius-full)',
+                              border: '1px solid rgba(229,169,60,0.4)'
+                            }}
+                          >
+                            <Layers size={13} color="var(--gold-primary)" />
+                            <span>{imgList.length} {imgList.length === 1 ? 'Photo' : 'Photos'}</span>
+                            {imgList.length > 1 && (
+                              <span style={{ color: '#10B981', fontSize: '0.66rem', fontWeight: 800 }}>● 1s</span>
+                            )}
+                          </div>
+
+                          {/* Category Badge */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '10px',
+                              left: '10px',
+                              zIndex: 3
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                backgroundColor: 'rgba(5, 5, 5, 0.8)',
+                                backdropFilter: 'blur(6px)',
+                                color: 'var(--gold-primary)',
+                                padding: '4px 9px',
+                                borderRadius: 'var(--radius-full)',
+                                border: '1px solid var(--border-gold)'
+                              }}
+                            >
+                              {proj.category_name}
+                            </span>
+                          </div>
+
+                          {/* Thumbnail Strip along bottom if >1 images */}
+                          {imgList.length > 1 && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                bottom: '8px',
+                                left: '8px',
+                                right: '8px',
+                                zIndex: 3,
+                                display: 'flex',
+                                gap: '6px',
+                                overflowX: 'auto',
+                                padding: '4px',
+                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                backdropFilter: 'blur(8px)',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              {imgList.map((im, i) => (
+                                <img
+                                  key={i}
+                                  src={im}
+                                  alt=""
+                                  style={{
+                                    width: '32px',
+                                    height: '24px',
+                                    objectFit: 'cover',
+                                    borderRadius: '3px',
+                                    border: i === 0 ? '1px solid var(--gold-primary)' : '1px solid rgba(255,255,255,0.2)'
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Project Details */}
+                        <div style={{ padding: '16px' }}>
+                          <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: '0 0 6px 0' }}>
+                            {proj.title}
+                          </h4>
+                          <p style={{ fontSize: '0.82rem', color: '#888', margin: '0 0 14px 0' }}>
+                            📍 {proj.location || 'Local Site'} • {proj.project_date || '2026'}
+                          </p>
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                            <button
+                              onClick={() => {
+                                setEditingProject({
+                                  ...proj,
+                                  images: Array.isArray(proj.images) && proj.images.length > 0 ? [...proj.images] : (proj.cover_image ? [proj.cover_image] : [])
+                                });
+                                setNewProjectImageUrl('');
+                              }}
+                              style={{
+                                background: 'rgba(229, 169, 60, 0.1)',
+                                border: '1px solid var(--border-gold)',
+                                color: 'var(--gold-primary)',
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '0.8rem',
+                                fontWeight: 600
+                              }}
+                            >
+                              <Edit2 size={13} /> Edit
+                            </button>
+
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Delete project '${proj.title}'?`)) {
+                                  await api.deleteProject(proj.id);
+                                  await loadProjects();
+                                  onDataRefresh && onDataRefresh();
+                                  onShowToast && onShowToast('Project deleted successfully', 'success');
+                                }
+                              }}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#EF4444',
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* CATEGORY EDIT / ADD MODAL */}
+            {editingCategory && (
+              <div
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 10000,
+                  backgroundColor: 'rgba(0,0,0,0.85)',
+                  backdropFilter: 'blur(12px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '20px'
+                }}
+              >
+                <div
+                  className="card-glass"
+                  style={{
+                    maxWidth: '480px',
+                    width: '100%',
+                    padding: '28px',
+                    backgroundColor: '#121212',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border-gold)',
+                    maxHeight: '90vh',
+                    overflowY: 'auto'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                      {editingCategory.id ? 'Edit Category' : 'Add New Category'}
+                    </h3>
+                    <button onClick={() => setEditingCategory(null)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      try {
+                        if (editingCategory.id) {
+                          await api.updateCategory(editingCategory.id, editingCategory);
+                          onShowToast && onShowToast('Category updated successfully!', 'success');
+                        } else {
+                          await api.createCategory(editingCategory);
+                          onShowToast && onShowToast('New category created and live on website!', 'success');
+                        }
+                        setEditingCategory(null);
+                        await loadProjects();
+                        onDataRefresh && onDataRefresh();
+                      } catch (err) {
+                        onShowToast && onShowToast(err.message || 'Failed to save category', 'error');
+                      }
+                    }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
+                  >
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>
+                        Category Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. LED Neon Signs or 3D Acrylic Boards"
+                        value={editingCategory.name || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const autoSlug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+                          setEditingCategory({
+                            ...editingCategory,
+                            name: val,
+                            slug: editingCategory.id ? editingCategory.slug : autoSlug
+                          });
+                        }}
+                        style={{ width: '100%', padding: '11px 14px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '8px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>
+                        Category URL Slug *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. led-neon-signs"
+                        value={editingCategory.slug || ''}
+                        onChange={(e) => setEditingCategory({ ...editingCategory, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                        style={{ width: '100%', padding: '11px 14px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '8px' }}
+                      />
+                      <span style={{ fontSize: '0.74rem', color: '#777', marginTop: '4px', display: 'block' }}>
+                        Used in URL and website filter pills matching
+                      </span>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>
+                        Display Order
+                      </label>
+                      <input
+                        type="number"
+                        value={editingCategory.display_order ?? 0}
+                        onChange={(e) => setEditingCategory({ ...editingCategory, display_order: parseInt(e.target.value, 10) || 0 })}
+                        style={{ width: '100%', padding: '11px 14px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '8px' }}
+                      />
+                    </div>
+
+                    <button type="submit" className="btn-primary" style={{ padding: '13px', marginTop: '8px' }}>
+                      {editingCategory.id ? 'Save Category Changes' : 'Create Category'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* PROJECT EDIT / ADD MODAL WITH MULTI-IMAGE GALLERY */}
             {editingProject && (
               <div
                 style={{
@@ -1304,20 +1980,25 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
                 <div
                   className="card-glass"
                   style={{
-                    maxWidth: '560px',
+                    maxWidth: '680px',
                     width: '100%',
                     padding: '30px',
                     backgroundColor: '#121212',
                     borderRadius: '16px',
                     border: '1px solid var(--border-gold)',
-                    maxHeight: '90vh',
+                    maxHeight: '92vh',
                     overflowY: 'auto'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fff' }}>
-                      {editingProject.id ? 'Edit Project' : 'Add New Project'}
-                    </h3>
+                    <div>
+                      <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                        {editingProject.id ? 'Edit Project' : 'Add New Project'}
+                      </h3>
+                      <p style={{ color: '#888', fontSize: '0.82rem', margin: '4px 0 0 0' }}>
+                        Configure details and multiple images for 1-second auto-slideshow
+                      </p>
+                    </div>
                     <button onClick={() => setEditingProject(null)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>
                       <X size={20} />
                     </button>
@@ -1326,80 +2007,302 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      if (editingProject.id) {
-                        await api.updateProject(editingProject.id, editingProject);
-                        onShowToast && onShowToast('Project updated successfully', 'success');
-                      } else {
-                        await api.createProject(editingProject);
-                        onShowToast && onShowToast('Project created successfully', 'success');
+                      try {
+                        const imagesArray = Array.isArray(editingProject.images) && editingProject.images.length > 0
+                          ? editingProject.images
+                          : [editingProject.cover_image || '/uploads/portfolio_spice_hub.jpg'];
+
+                        const payload = {
+                          ...editingProject,
+                          cover_image: imagesArray[0],
+                          images: imagesArray
+                        };
+
+                        if (editingProject.id) {
+                          await api.updateProject(editingProject.id, payload);
+                          onShowToast && onShowToast('Project updated with gallery slideshow!', 'success');
+                        } else {
+                          await api.createProject(payload);
+                          onShowToast && onShowToast('Project created successfully!', 'success');
+                        }
+                        setEditingProject(null);
+                        await loadProjects();
+                        onDataRefresh && onDataRefresh();
+                      } catch (err) {
+                        onShowToast && onShowToast(err.message || 'Failed to save project', 'error');
                       }
-                      setEditingProject(null);
-                      loadProjects();
-                      onDataRefresh && onDataRefresh();
                     }}
-                    style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
                   >
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#AAA', marginBottom: '4px' }}>Project Title *</label>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>Project Title *</label>
                       <input
                         type="text"
                         required
-                        value={editingProject.title}
+                        placeholder="e.g. Spice Hub Sign Board"
+                        value={editingProject.title || ''}
                         onChange={(e) => setEditingProject({ ...editingProject, title: e.target.value })}
                         style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
                       />
                     </div>
 
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#AAA', marginBottom: '4px' }}>Category *</label>
-                      <select
-                        value={editingProject.category_name}
-                        onChange={(e) => setEditingProject({ ...editingProject, category_name: e.target.value })}
-                        style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
-                      >
-                        <option value="Shop Sign Boards">Shop Sign Boards</option>
-                        <option value="Interior Design">Interior Design</option>
-                        <option value="LED Boards">LED Boards</option>
-                        <option value="Acrylic Letters">Acrylic Letters</option>
-                        <option value="Office Branding">Office Branding</option>
-                        <option value="Restaurant">Restaurant</option>
-                        <option value="Showroom">Showroom</option>
-                      </select>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>Dynamic Category *</label>
+                        <select
+                          value={editingProject.category_id || ''}
+                          onChange={(e) => {
+                            const catId = parseInt(e.target.value, 10);
+                            const found = categories.find(c => c.id === catId);
+                            setEditingProject({
+                              ...editingProject,
+                              category_id: catId,
+                              category_name: found ? found.name : editingProject.category_name
+                            });
+                          }}
+                          style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
+                        >
+                          {categories.filter(c => c.slug !== 'all').map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>Location</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Bistupur, Jamshedpur"
+                          value={editingProject.location || ''}
+                          onChange={(e) => setEditingProject({ ...editingProject, location: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* MULTI-IMAGE GALLERY MANAGER */}
+                    <div
+                      style={{
+                        backgroundColor: '#161618',
+                        padding: '18px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(229, 169, 60, 0.35)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Layers size={16} color="var(--gold-primary)" />
+                            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                              Project Images Gallery ({ (editingProject.images || []).length } Photos)
+                            </h4>
+                          </div>
+                          <p style={{ color: '#aaa', fontSize: '0.78rem', margin: '4px 0 0 0' }}>
+                            ✨ <strong>1-Second Auto-Slideshow:</strong> If you add 4 (or multiple) images, they will scroll automatically every 1 sec inside this single card on the website!
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Thumbnails Strip */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', margin: '14px 0' }}>
+                        {(editingProject.images || []).map((imgUrl, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              position: 'relative',
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                              backgroundColor: '#0a0a0a',
+                              border: idx === 0 ? '2px solid var(--gold-primary)' : '1px solid rgba(255,255,255,0.1)'
+                            }}
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Photo ${idx + 1}`}
+                              style={{ width: '100%', height: '85px', objectFit: 'cover', display: 'block' }}
+                            />
+
+                            {/* Badge */}
+                            <span
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                left: '4px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                backgroundColor: idx === 0 ? 'var(--gold-primary)' : 'rgba(0,0,0,0.7)',
+                                color: idx === 0 ? '#000' : '#FFF',
+                                padding: '2px 6px',
+                                borderRadius: '4px'
+                              }}
+                            >
+                              {idx === 0 ? 'Cover' : `#${idx + 1}`}
+                            </span>
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newImages = (editingProject.images || []).filter((_, i) => i !== idx);
+                                setEditingProject({
+                                  ...editingProject,
+                                  images: newImages,
+                                  cover_image: newImages[0] || ''
+                                });
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                backgroundColor: 'rgba(239,68,68,0.85)',
+                                color: '#FFF',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer'
+                              }}
+                              title="Remove Photo"
+                            >
+                              <X size={12} />
+                            </button>
+
+                            {/* Set as Cover button */}
+                            {idx > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const cur = [...editingProject.images];
+                                  const [selected] = cur.splice(idx, 1);
+                                  cur.unshift(selected);
+                                  setEditingProject({
+                                    ...editingProject,
+                                    images: cur,
+                                    cover_image: selected
+                                  });
+                                }}
+                                style={{
+                                  width: '100%',
+                                  padding: '3px 0',
+                                  backgroundColor: '#1E1E22',
+                                  color: 'var(--gold-primary)',
+                                  border: 'none',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Set as Cover
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add Image Options (File Upload + URL Input) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {/* File Upload Button */}
+                          <label
+                            className="btn-outline-gold"
+                            style={{
+                              padding: '8px 16px',
+                              fontSize: '0.84rem',
+                              cursor: uploadingProjectPhoto ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <UploadCloud size={16} />
+                            <span>{uploadingProjectPhoto ? 'Uploading Photo...' : '+ Upload Photo File'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              disabled={uploadingProjectPhoto}
+                              style={{ display: 'none' }}
+                              onChange={async (e) => {
+                                const file = e.target.files && e.target.files[0];
+                                if (!file) return;
+                                setUploadingProjectPhoto(true);
+                                try {
+                                  const fd = new FormData();
+                                  fd.append('file', file);
+                                  const res = await api.uploadMedia(fd);
+                                  if (res.data && res.data.file_url) {
+                                    const currentImages = editingProject.images || [];
+                                    const nextImages = [...currentImages, res.data.file_url];
+                                    setEditingProject({
+                                      ...editingProject,
+                                      images: nextImages,
+                                      cover_image: nextImages[0]
+                                    });
+                                    onShowToast && onShowToast('Photo uploaded and added to card slideshow!', 'success');
+                                  }
+                                } catch (err) {
+                                  onShowToast && onShowToast(err.message || 'Photo upload failed', 'error');
+                                } finally {
+                                  setUploadingProjectPhoto(false);
+                                  e.target.value = '';
+                                }
+                              }}
+                            />
+                          </label>
+
+                          <span style={{ fontSize: '0.8rem', color: '#666' }}>OR</span>
+
+                          {/* URL Input */}
+                          <div style={{ display: 'flex', gap: '6px', flex: 1, minWidth: '220px' }}>
+                            <input
+                              type="text"
+                              placeholder="Paste image URL (e.g. /uploads/...)"
+                              value={newProjectImageUrl}
+                              onChange={(e) => setNewProjectImageUrl(e.target.value)}
+                              style={{ flex: 1, padding: '8px 12px', backgroundColor: '#111', border: '1px solid #333', color: '#FFF', borderRadius: '6px', fontSize: '0.82rem' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!newProjectImageUrl || !newProjectImageUrl.trim()) return;
+                                const url = newProjectImageUrl.trim();
+                                const currentImages = editingProject.images || [];
+                                const nextImages = [...currentImages, url];
+                                setEditingProject({
+                                  ...editingProject,
+                                  images: nextImages,
+                                  cover_image: nextImages[0]
+                                });
+                                setNewProjectImageUrl('');
+                                onShowToast && onShowToast('Image URL added to slideshow', 'success');
+                              }}
+                              className="btn-secondary"
+                              style={{ padding: '8px 14px', fontSize: '0.82rem' }}
+                            >
+                              Add URL
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#AAA', marginBottom: '4px' }}>Location</label>
-                      <input
-                        type="text"
-                        value={editingProject.location}
-                        onChange={(e) => setEditingProject({ ...editingProject, location: e.target.value })}
-                        style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#AAA', marginBottom: '4px' }}>Cover Image URL *</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingProject.cover_image}
-                        onChange={(e) => setEditingProject({ ...editingProject, cover_image: e.target.value })}
-                        style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#AAA', marginBottom: '4px' }}>Description</label>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#AAA', marginBottom: '6px' }}>Description</label>
                       <textarea
                         rows={3}
-                        value={editingProject.short_description}
+                        placeholder="Brief summary of signage materials, lighting specifications, dimensions..."
+                        value={editingProject.short_description || ''}
                         onChange={(e) => setEditingProject({ ...editingProject, short_description: e.target.value })}
                         style={{ width: '100%', padding: '10px 12px', backgroundColor: '#1A1A1A', border: '1px solid #333', color: '#FFF', borderRadius: '6px' }}
                       />
                     </div>
 
-                    <button type="submit" className="btn-primary" style={{ padding: '12px', marginTop: '10px' }}>
-                      Save Project
+                    <button type="submit" className="btn-primary" style={{ padding: '13px', marginTop: '6px' }}>
+                      {editingProject.id ? 'Save Project & Slideshow' : 'Publish Project'}
                     </button>
                   </form>
                 </div>
@@ -1407,6 +2310,7 @@ export default function AdminDashboard({ onClose, onNavigateWebsite, isStandalon
             )}
           </div>
         )}
+
 
         {/* TAB 5: BEFORE / AFTER MANAGER */}
         {activeTab === 'beforeAfter' && (

@@ -376,3 +376,56 @@ button, input, select, textarea {
   }
 }
 
+/* Spinner Animation for Refresh buttons */
+.spin-anim {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Luxury Sleek Scrollbar for Scrollable Category Items Container */
+.category-items-scrollable::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.category-items-scrollable::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+
+.category-items-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(229, 169, 60, 0.35);
+  border-radius: 4px;
+}
+
+.category-items-scrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-primary);
+}
+
+/* Horizontal Category Pills Scrollbar */
+.horizontal-scroll-gold {
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 169, 60, 0.4) rgba(255, 255, 255, 0.05);
+}
+
+.horizontal-scroll-gold::-webkit-scrollbar {
+  height: 5px;
+}
+
+.horizontal-scroll-gold::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.horizontal-scroll-gold::-webkit-scrollbar-thumb {
+  background: var(--gold-primary);
+  border-radius: 10px;
+}
+
+

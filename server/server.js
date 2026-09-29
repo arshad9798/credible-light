@@ -57,6 +57,21 @@ const upload = multer({
   }
 });
 
+// Safe upload wrapper that returns friendly JSON errors instead of crashing
+const uploadEnquiryPhoto = (req, res, next) => {
+  if (req.is && req.is('multipart/form-data')) {
+    upload.single('photo')(req, res, (err) => {
+      if (err) {
+        console.warn('Enquiry photo upload error:', err.message);
+        return res.status(400).json({ error: `Photo upload error: ${err.message}` });
+      }
+      next();
+    });
+  } else {
+    next();
+  }
+};
+
 // Helper function to extract settings dictionary
 function getSettingsDict() {
   const rows = db.prepare('SELECT key, value FROM website_settings').all();
@@ -109,6 +124,23 @@ app.get('/api/public/bootstrap', (req, res) => {
       } catch (e) {
         s.features = [];
       }
+    });
+
+    // Parse JSON images for projects
+    projects.forEach(p => {
+      let imgList = [];
+      try {
+        if (p.images) {
+          imgList = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+        }
+      } catch (e) {
+        imgList = [];
+      }
+      if (!Array.isArray(imgList) || imgList.length === 0) {
+        imgList = p.cover_image ? [p.cover_image] : [];
+      }
+      p.images = imgList;
+      p.gallery = imgList.map((url, idx) => ({ id: idx, image_url: url }));
     });
 
     // Parse JSON features for gift products
@@ -172,7 +204,10 @@ app.get('/api/public/services/:slug', (req, res) => {
 
 // Projects List
 app.get('/api/public/projects', (req, res) => {
-  const { category } = req.query;
+  let { category } = req.query;
+  if (!category || category === 'undefined' || category === 'null') {
+    category = 'all';
+  }
   let query = 'SELECT * FROM projects';
   const params = [];
   if (category && category !== 'all') {
@@ -181,6 +216,21 @@ app.get('/api/public/projects', (req, res) => {
   }
   query += ' ORDER BY display_order ASC, id DESC';
   const projects = db.prepare(query).all(...params);
+  projects.forEach(p => {
+    let imgList = [];
+    try {
+      if (p.images) {
+        imgList = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+      }
+    } catch (e) {
+      imgList = [];
+    }
+    if (!Array.isArray(imgList) || imgList.length === 0) {
+      imgList = p.cover_image ? [p.cover_image] : [];
+    }
+    p.images = imgList;
+    p.gallery = imgList.map((url, idx) => ({ id: idx, image_url: url }));
+  });
   res.json({ success: true, data: projects });
 });
 
@@ -190,27 +240,37 @@ app.get('/api/public/projects/:slug', (req, res) => {
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
+  let imgList = [];
+  try {
+    if (project.images) {
+      imgList = typeof project.images === 'string' ? JSON.parse(project.images) : project.images;
+    }
+  } catch (e) {
+    imgList = [];
+  }
+  if (!Array.isArray(imgList) || imgList.length === 0) {
+    imgList = project.cover_image ? [project.cover_image] : [];
+  }
+  project.images = imgList;
   const images = db.prepare('SELECT * FROM project_images WHERE project_id = ? ORDER BY display_order ASC').all(project.id);
-  project.gallery = images;
+  project.gallery = images.length > 0 ? images : imgList.map((url, idx) => ({ id: idx, image_url: url }));
   res.json({ success: true, data: project });
 });
 
 // Create Public Enquiry / Quote Request
-app.post('/api/public/enquiries', upload.single('photo'), (req, res) => {
+app.post('/api/public/enquiries', uploadEnquiryPhoto, (req, res) => {
   try {
-    const {
-      name,
-      phone,
-      whatsapp,
-      email,
-      location,
-      business_type,
-      service_id,
-      service_name,
-      approx_size,
-      budget_range,
-      requirement_details
-    } = req.body;
+    const name = (req.body.name || req.body.customer_name || '').trim();
+    const phone = (req.body.phone || req.body.mobile || '').trim();
+    const whatsapp = (req.body.whatsapp || phone).trim();
+    const email = (req.body.email || '').trim();
+    const location = (req.body.location || req.body.city_location || '').trim();
+    const business_type = (req.body.business_type || '').trim();
+    const service_id = req.body.service_id ? parseInt(req.body.service_id, 10) : null;
+    const service_name = (req.body.service_name || 'General Signage Enquiry').trim();
+    const approx_size = (req.body.approx_size || '').trim();
+    const budget_range = (req.body.budget_range || '').trim();
+    const requirement_details = (req.body.requirement_details || '').trim();
 
     if (!name || !phone) {
       return res.status(400).json({ error: 'Name and Phone number are required' });
@@ -239,13 +299,15 @@ app.post('/api/public/enquiries', upload.single('photo'), (req, res) => {
       email || '',
       location || '',
       business_type || '',
-      service_id ? parseInt(service_id, 10) : null,
-      service_name || 'General Signage Enquiry',
+      service_id,
+      service_name,
       approx_size || '',
       budget_range || '',
       requirement_details || '',
       photoUrl
     );
+
+    console.log(`[ENQUIRY] New enquiry #${result.lastInsertRowid} recorded for ${name} (${phone}) - Service: ${service_name}`);
 
     // Generate dynamic WhatsApp reply link
     const waNumber = '918789640490';
@@ -429,14 +491,38 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'Username/Email and Password are required' });
   }
 
-  const user = db.prepare('SELECT * FROM admin_users WHERE username = ? OR email = ?').get(username, username);
+  const cleanUser = username.trim();
+  // Support case-insensitive matching by username or email
+  const user = db.prepare('SELECT * FROM admin_users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)').get(cleanUser, cleanUser);
   if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Invalid credentials. User not found.' });
   }
 
-  const match = bcrypt.compareSync(password, user.password_hash);
+  let match = false;
+  // If stored password is a standard bcrypt hash ($2a$, $2b$, $2y$)
+  if (user.password_hash && /^\$2[aby]\$\d{2}\$/.test(user.password_hash)) {
+    try {
+      match = bcrypt.compareSync(password, user.password_hash);
+    } catch (err) {
+      match = false;
+    }
+  } else {
+    // Direct plain text password support if changed directly in DB!
+    match = (password === user.password_hash);
+    if (match) {
+      // Auto-migrate to secure bcrypt hash in the DB
+      try {
+        const newHash = bcrypt.hashSync(password, 10);
+        db.prepare('UPDATE admin_users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+        console.log(`[AUTH] Automatically upgraded plain-text password for admin "${user.username}" to bcrypt hash.`);
+      } catch (err) {
+        console.warn('Could not upgrade plain text hash:', err);
+      }
+    }
+  }
+
   if (!match) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Invalid credentials. Incorrect password.' });
   }
 
   const token = jwt.sign(
@@ -460,6 +546,74 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/auth/me', authenticateAdmin, (req, res) => {
   const user = db.prepare('SELECT id, username, email, role, created_at FROM admin_users WHERE id = ?').get(req.admin.id);
   res.json({ success: true, user });
+});
+
+// Update Admin Credentials (Username, Email, Password)
+app.put('/api/admin/credentials', authenticateAdmin, (req, res) => {
+  try {
+    const { username, email, new_password, current_password } = req.body;
+    const currentAdmin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(req.admin.id);
+    if (!currentAdmin) {
+      return res.status(404).json({ error: 'Admin account not found' });
+    }
+
+    // If new password is provided, verify current password
+    if (new_password) {
+      if (new_password.length < 5) {
+        return res.status(400).json({ error: 'New password must be at least 5 characters long' });
+      }
+      if (current_password) {
+        let currentMatch = false;
+        if (currentAdmin.password_hash && /^\$2[aby]\$\d{2}\$/.test(currentAdmin.password_hash)) {
+          currentMatch = bcrypt.compareSync(current_password, currentAdmin.password_hash);
+        } else {
+          currentMatch = (current_password === currentAdmin.password_hash);
+        }
+        if (!currentMatch) {
+          return res.status(400).json({ error: 'Current password is incorrect' });
+        }
+      }
+    }
+
+    const updatedUsername = (username && username.trim()) ? username.trim() : currentAdmin.username;
+    const updatedEmail = (email && email.trim()) ? email.trim() : currentAdmin.email;
+
+    // Check if new username or email is already taken by another admin
+    const existing = db.prepare('SELECT id FROM admin_users WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) AND id != ?').get(updatedUsername, updatedEmail, req.admin.id);
+    if (existing) {
+      return res.status(400).json({ error: 'Username or email is already in use by another user' });
+    }
+
+    let updatedHash = currentAdmin.password_hash;
+    if (new_password) {
+      updatedHash = bcrypt.hashSync(new_password, 10);
+    }
+
+    db.prepare(`
+      UPDATE admin_users
+      SET username = ?, email = ?, password_hash = ?
+      WHERE id = ?
+    `).run(updatedUsername, updatedEmail, updatedHash, req.admin.id);
+
+    const updatedUser = db.prepare('SELECT id, username, email, role, created_at FROM admin_users WHERE id = ?').get(req.admin.id);
+
+    // Issue refreshed token with updated info
+    const newToken = jwt.sign(
+      { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role, email: updatedUser.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Admin credentials updated successfully!',
+      token: newToken,
+      user: updatedUser
+    });
+  } catch (err) {
+    console.error('Update credentials error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update credentials' });
+  }
 });
 
 // ==========================================
@@ -496,19 +650,26 @@ app.get('/api/admin/dashboard/stats', authenticateAdmin, (req, res) => {
 
 // Enquiries List & Filter
 app.get('/api/admin/enquiries', authenticateAdmin, (req, res) => {
-  const { status, search } = req.query;
+  let { status, search } = req.query;
+  if (!status || status === 'All' || status === 'undefined' || status === 'null') {
+    status = null;
+  }
+  if (!search || search === 'undefined' || search === 'null' || !search.trim()) {
+    search = null;
+  }
+
   let query = 'SELECT * FROM enquiries';
   const params = [];
   const conditions = [];
 
-  if (status && status !== 'All') {
+  if (status) {
     conditions.push('status = ?');
     params.push(status);
   }
   if (search) {
-    conditions.push('(customer_name LIKE ? OR phone LIKE ? OR whatsapp LIKE ? OR city_location LIKE ? OR service_name LIKE ?)');
-    const s = `%${search}%`;
-    params.push(s, s, s, s, s);
+    conditions.push('(customer_name LIKE ? OR phone LIKE ? OR whatsapp LIKE ? OR city_location LIKE ? OR service_name LIKE ? OR requirement_details LIKE ?)');
+    const s = `%${search.trim()}%`;
+    params.push(s, s, s, s, s, s);
   }
 
   if (conditions.length > 0) {
@@ -675,24 +836,119 @@ app.delete('/api/admin/services/:id', authenticateAdmin, (req, res) => {
 // Projects CRUD
 app.get('/api/admin/projects', authenticateAdmin, (req, res) => {
   const projects = db.prepare('SELECT * FROM projects ORDER BY display_order ASC, id DESC').all();
+  projects.forEach(p => {
+    let imgList = [];
+    try {
+      if (p.images) {
+        imgList = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+      }
+    } catch (e) {
+      imgList = [];
+    }
+    if (!Array.isArray(imgList) || imgList.length === 0) {
+      imgList = p.cover_image ? [p.cover_image] : [];
+    }
+    p.images = imgList;
+  });
   res.json({ success: true, data: projects });
 });
 
 app.post('/api/admin/projects', authenticateAdmin, (req, res) => {
-  const { title, slug, category_id, category_name, location, short_description, full_description, project_date, cover_image, is_featured, display_order } = req.body;
-  const pSlug = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  let { title, slug, category_id, category_name, location, short_description, full_description, project_date, cover_image, images, is_featured, display_order } = req.body;
+  const pSlug = slug || (title ? title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : `project-${Date.now()}`);
+
+  // Normalize images
+  let imagesArray = [];
+  if (Array.isArray(images)) {
+    imagesArray = images.map(s => String(s).trim()).filter(Boolean);
+  } else if (typeof images === 'string') {
+    try {
+      const parsed = JSON.parse(images);
+      if (Array.isArray(parsed)) imagesArray = parsed.map(s => String(s).trim()).filter(Boolean);
+      else imagesArray = images.split(',').map(s => s.trim()).filter(Boolean);
+    } catch (e) {
+      imagesArray = images.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  if (cover_image && !imagesArray.includes(cover_image)) {
+    imagesArray.unshift(cover_image);
+  } else if (!cover_image && imagesArray.length > 0) {
+    cover_image = imagesArray[0];
+  }
+  if (!cover_image) cover_image = '/uploads/portfolio_spice_hub.jpg';
+  if (imagesArray.length === 0) imagesArray = [cover_image];
+
+  // Sync category_name from category_id
+  if (category_id) {
+    const cat = db.prepare('SELECT id, name FROM portfolio_categories WHERE id = ?').get(category_id);
+    if (cat) {
+      category_name = cat.name;
+    }
+  }
+
+  const imagesJson = JSON.stringify(imagesArray);
 
   const result = db.prepare(`
-    INSERT INTO projects (slug, title, category_id, category_name, location, short_description, full_description, project_date, cover_image, is_featured, display_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(pSlug, title, category_id || 1, category_name || 'Signage', location || '', short_description || '', full_description || '', project_date || '2026', cover_image || '/uploads/portfolio_spice_hub.jpg', is_featured ? 1 : 0, display_order || 0);
+    INSERT INTO projects (slug, title, category_id, category_name, location, short_description, full_description, project_date, cover_image, images, is_featured, display_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    pSlug,
+    title || 'Untitled Project',
+    category_id || 1,
+    category_name || 'Shop Sign Boards',
+    location || '',
+    short_description || '',
+    full_description || '',
+    project_date || '2026',
+    cover_image,
+    imagesJson,
+    is_featured ? 1 : 0,
+    display_order || 0
+  );
 
   const newProject = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid);
+  newProject.images = imagesArray;
   res.status(201).json({ success: true, data: newProject });
 });
 
 app.put('/api/admin/projects/:id', authenticateAdmin, (req, res) => {
-  const { title, slug, category_id, category_name, location, short_description, full_description, project_date, cover_image, is_featured, display_order } = req.body;
+  let { title, slug, category_id, category_name, location, short_description, full_description, project_date, cover_image, images, is_featured, display_order } = req.body;
+  const current = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!current) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  // Normalize images
+  let imagesArray = null;
+  if (images !== undefined) {
+    if (Array.isArray(images)) {
+      imagesArray = images.map(s => String(s).trim()).filter(Boolean);
+    } else if (typeof images === 'string') {
+      try {
+        const parsed = JSON.parse(images);
+        if (Array.isArray(parsed)) imagesArray = parsed.map(s => String(s).trim()).filter(Boolean);
+        else imagesArray = images.split(',').map(s => s.trim()).filter(Boolean);
+      } catch (e) {
+        imagesArray = images.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+    if (cover_image && imagesArray && !imagesArray.includes(cover_image)) {
+      imagesArray.unshift(cover_image);
+    } else if (!cover_image && imagesArray && imagesArray.length > 0) {
+      cover_image = imagesArray[0];
+    }
+  }
+
+  // Sync category_name from category_id
+  if (category_id) {
+    const cat = db.prepare('SELECT id, name FROM portfolio_categories WHERE id = ?').get(category_id);
+    if (cat) {
+      category_name = cat.name;
+    }
+  }
+
+  const imagesJson = imagesArray !== null ? JSON.stringify(imagesArray) : current.images;
 
   db.prepare(`
     UPDATE projects
@@ -705,12 +961,32 @@ app.put('/api/admin/projects/:id', authenticateAdmin, (req, res) => {
         full_description = COALESCE(?, full_description),
         project_date = COALESCE(?, project_date),
         cover_image = COALESCE(?, cover_image),
+        images = COALESCE(?, images),
         is_featured = COALESCE(?, is_featured),
         display_order = COALESCE(?, display_order)
     WHERE id = ?
-  `).run(title, slug, category_id, category_name, location, short_description, full_description, project_date, cover_image, is_featured, display_order, req.params.id);
+  `).run(
+    title,
+    slug,
+    category_id,
+    category_name,
+    location,
+    short_description,
+    full_description,
+    project_date,
+    cover_image,
+    imagesJson,
+    is_featured,
+    display_order,
+    req.params.id
+  );
 
   const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  try {
+    updated.images = updated.images ? JSON.parse(updated.images) : [updated.cover_image];
+  } catch (e) {
+    updated.images = [updated.cover_image];
+  }
   res.json({ success: true, data: updated });
 });
 
@@ -719,10 +995,110 @@ app.delete('/api/admin/projects/:id', authenticateAdmin, (req, res) => {
   res.json({ success: true, message: 'Project deleted' });
 });
 
-// Categories
+// Categories CRUD
 app.get('/api/admin/categories', authenticateAdmin, (req, res) => {
-  const categories = db.prepare('SELECT * FROM portfolio_categories ORDER BY display_order ASC').all();
+  const categories = db.prepare(`
+    SELECT c.*, COUNT(p.id) as project_count
+    FROM portfolio_categories c
+    LEFT JOIN projects p ON p.category_id = c.id
+    GROUP BY c.id
+    ORDER BY c.display_order ASC, c.id ASC
+  `).all();
   res.json({ success: true, data: categories });
+});
+
+app.post('/api/admin/categories', authenticateAdmin, (req, res) => {
+  try {
+    let { name, slug, display_order } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Category name is required' });
+    }
+    name = name.trim();
+    if (!slug || !slug.trim()) {
+      slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    } else {
+      slug = slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    }
+
+    const existing = db.prepare('SELECT id FROM portfolio_categories WHERE slug = ?').get(slug);
+    if (existing) {
+      slug = `${slug}-${Date.now().toString().slice(-4)}`;
+    }
+
+    const order = display_order !== undefined && display_order !== '' ? parseInt(display_order, 10) : 0;
+    const result = db.prepare('INSERT INTO portfolio_categories (name, slug, display_order) VALUES (?, ?, ?)').run(name, slug, order);
+    const created = db.prepare('SELECT *, 0 as project_count FROM portfolio_categories WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json({ success: true, data: created });
+  } catch (err) {
+    console.error('Create category error:', err);
+    res.status(500).json({ error: err.message || 'Failed to create category' });
+  }
+});
+
+app.put('/api/admin/categories/:id', authenticateAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    let { name, slug, display_order } = req.body;
+    const current = db.prepare('SELECT * FROM portfolio_categories WHERE id = ?').get(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    name = name && name.trim() ? name.trim() : current.name;
+    if (slug && slug.trim()) {
+      slug = slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      const existing = db.prepare('SELECT id FROM portfolio_categories WHERE slug = ? AND id != ?').get(slug, id);
+      if (existing) {
+        return res.status(400).json({ error: 'Slug is already used by another category' });
+      }
+    } else {
+      slug = current.slug;
+    }
+    const order = display_order !== undefined && display_order !== '' ? parseInt(display_order, 10) : current.display_order;
+
+    db.prepare('UPDATE portfolio_categories SET name = ?, slug = ?, display_order = ? WHERE id = ?').run(name, slug, order, id);
+
+    // Synchronize category_name in projects table
+    db.prepare('UPDATE projects SET category_name = ? WHERE category_id = ?').run(name, id);
+
+    const updated = db.prepare(`
+      SELECT c.*, COUNT(p.id) as project_count
+      FROM portfolio_categories c
+      LEFT JOIN projects p ON p.category_id = c.id
+      WHERE c.id = ?
+      GROUP BY c.id
+    `).get(id);
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Update category error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update category' });
+  }
+});
+
+app.delete('/api/admin/categories/:id', authenticateAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    const current = db.prepare('SELECT * FROM portfolio_categories WHERE id = ?').get(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    if (current.slug === 'all') {
+      return res.status(400).json({ error: 'The primary "All" category cannot be deleted' });
+    }
+
+    // Safely reassign any projects in this category to 'all' or fallback category
+    const allCat = db.prepare("SELECT id, name FROM portfolio_categories WHERE slug = 'all' LIMIT 1").get();
+    if (allCat) {
+      db.prepare('UPDATE projects SET category_id = ?, category_name = ? WHERE category_id = ?').run(allCat.id, allCat.name, id);
+    }
+
+    db.prepare('DELETE FROM portfolio_categories WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Category deleted successfully' });
+  } catch (err) {
+    console.error('Delete category error:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete category' });
+  }
 });
 
 // Testimonials CRUD

@@ -1,23 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Sparkles, MapPin, ArrowRight, Eye, Layers } from 'lucide-react';
 
-// Single project card with automatic 1-second slideshow for multiple images
-function ProjectCard({ project, onSelectProject }) {
-  const images = Array.isArray(project.images) && project.images.length > 0
-    ? project.images
-    : [project.cover_image];
-
-  const [currentIdx, setCurrentIdx] = useState(0);
+// Individual showcase card for every single uploaded image under its category
+function PortfolioItemCard({ item, onSelectProject }) {
   const [isHovered, setIsHovered] = useState(false);
-
-  // Automatic scroll/slideshow every 1 second (1000ms) as requested
-  useEffect(() => {
-    if (images.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentIdx((prev) => (prev + 1) % images.length);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [images.length]);
 
   return (
     <div
@@ -28,22 +14,23 @@ function ProjectCard({ project, onSelectProject }) {
         overflow: 'hidden',
         cursor: 'pointer',
         backgroundColor: 'var(--bg-card)',
-        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
-        border: '1px solid rgba(255, 255, 255, 0.08)'
+        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease, border-color 0.3s ease',
+        border: isHovered ? '1px solid var(--border-gold)' : '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: isHovered ? '0 14px 34px rgba(0, 0, 0, 0.6), 0 0 24px rgba(229, 169, 60, 0.22)' : 'var(--shadow-md)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between'
       }}
-      onClick={() => onSelectProject(project)}
-      onMouseEnter={(e) => {
-        setIsHovered(true);
-        e.currentTarget.style.transform = 'translateY(-6px)';
-        e.currentTarget.style.boxShadow = '0 12px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(229, 169, 60, 0.2)';
-      }}
-      onMouseLeave={(e) => {
-        setIsHovered(false);
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-      }}
+      onClick={() => onSelectProject({
+        ...item,
+        cover_image: item.displayImage,
+        images: item.allImages && item.allImages.length > 0 ? item.allImages : [item.displayImage],
+        initialImageIndex: item.initialImageIndex || 0
+      })}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Cover Image / Multi-Image Slideshow Container */}
+      {/* High-res Image Container */}
       <div
         style={{
           position: 'relative',
@@ -53,33 +40,27 @@ function ProjectCard({ project, onSelectProject }) {
           backgroundColor: '#0a0a0a'
         }}
       >
-        {/* Images Layer with Crossfade */}
-        {images.map((imgUrl, idx) => (
-          <img
-            key={idx}
-            src={imgUrl}
-            alt={`${project.title} - view ${idx + 1}`}
-            loading="lazy"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              opacity: idx === currentIdx ? 1 : 0,
-              transition: 'opacity 0.4s ease-in-out, transform 0.6s ease',
-              transform: isHovered && idx === currentIdx ? 'scale(1.08)' : 'scale(1)',
-              pointerEvents: 'none'
-            }}
-          />
-        ))}
+        <img
+          src={item.displayImage}
+          alt={item.title}
+          loading="lazy"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            transition: 'transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            transform: isHovered ? 'scale(1.08)' : 'scale(1)'
+          }}
+        />
 
-        {/* Gradient Overlay */}
+        {/* Gradient Overlay for luxury feel */}
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'linear-gradient(to top, rgba(5,5,5,0.95) 0%, rgba(5,5,5,0.2) 60%, rgba(0,0,0,0) 100%)',
+            background: 'linear-gradient(to top, rgba(5,5,5,0.92) 0%, rgba(5,5,5,0.2) 60%, rgba(0,0,0,0) 100%)',
             pointerEvents: 'none'
           }}
         />
@@ -96,21 +77,22 @@ function ProjectCard({ project, onSelectProject }) {
           <span
             style={{
               fontSize: '0.72rem',
-              fontWeight: 600,
-              backgroundColor: 'rgba(5, 5, 5, 0.75)',
+              fontWeight: 700,
+              backgroundColor: 'rgba(5, 5, 5, 0.82)',
               backdropFilter: 'blur(8px)',
               color: 'var(--gold-primary)',
               padding: '4px 10px',
               borderRadius: 'var(--radius-full)',
-              border: '1px solid var(--border-gold)'
+              border: '1px solid var(--border-gold)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
             }}
           >
-            {project.category_name}
+            {item.category_name}
           </span>
         </div>
 
-        {/* Multi-Photo Count Badge (Only shown if card has >1 images) */}
-        {images.length > 1 && (
+        {/* Multi-Photo Number Badge if part of a set */}
+        {item.totalPhotos > 1 && (
           <div
             style={{
               position: 'absolute',
@@ -120,66 +102,23 @@ function ProjectCard({ project, onSelectProject }) {
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              fontSize: '0.72rem',
+              fontSize: '0.7rem',
               fontWeight: 700,
               color: '#fff',
-              backgroundColor: 'rgba(5, 5, 5, 0.8)',
+              backgroundColor: 'rgba(5, 5, 5, 0.82)',
               backdropFilter: 'blur(8px)',
-              padding: '4px 9px',
-              borderRadius: 'var(--radius-full)',
-              border: '1px solid rgba(229, 169, 60, 0.5)',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
-            }}
-          >
-            <Layers size={12} color="var(--gold-primary)" />
-            <span>{currentIdx + 1}/{images.length}</span>
-            <span style={{ fontSize: '0.62rem', color: '#10B981', marginLeft: '2px', fontWeight: 800 }}>● 1s</span>
-          </div>
-        )}
-
-        {/* Slideshow Dot Indicators */}
-        {images.length > 1 && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '10px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 4,
-              display: 'flex',
-              gap: '5px',
               padding: '4px 8px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(0, 0, 0, 0.55)',
-              backdropFilter: 'blur(6px)'
+              borderRadius: 'var(--radius-full)',
+              border: '1px solid rgba(229, 169, 60, 0.4)'
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            {images.map((_, dotIdx) => (
-              <button
-                key={dotIdx}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCurrentIdx(dotIdx);
-                }}
-                style={{
-                  width: dotIdx === currentIdx ? '14px' : '6px',
-                  height: '6px',
-                  borderRadius: '3px',
-                  backgroundColor: dotIdx === currentIdx ? 'var(--gold-primary)' : 'rgba(255, 255, 255, 0.4)',
-                  border: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  transition: 'all 0.25s ease'
-                }}
-                title={`View Photo ${dotIdx + 1}`}
-              />
-            ))}
+            <Layers size={11} color="var(--gold-primary)" />
+            <span>Image {item.photoNumber}/{item.totalPhotos}</span>
           </div>
         )}
 
-        {/* Location Badge (If 1 photo only) */}
-        {images.length === 1 && project.location && (
+        {/* Location Badge (if single image) */}
+        {item.totalPhotos <= 1 && item.location && (
           <div
             style={{
               position: 'absolute',
@@ -191,7 +130,7 @@ function ProjectCard({ project, onSelectProject }) {
               gap: '4px',
               fontSize: '0.72rem',
               color: 'var(--text-secondary)',
-              backgroundColor: 'rgba(5, 5, 5, 0.75)',
+              backgroundColor: 'rgba(5, 5, 5, 0.8)',
               backdropFilter: 'blur(8px)',
               padding: '4px 8px',
               borderRadius: 'var(--radius-full)',
@@ -199,7 +138,7 @@ function ProjectCard({ project, onSelectProject }) {
             }}
           >
             <MapPin size={11} color="var(--gold-primary)" />
-            <span>{project.location}</span>
+            <span>{item.location}</span>
           </div>
         )}
       </div>
@@ -210,44 +149,59 @@ function ProjectCard({ project, onSelectProject }) {
           padding: '16px 20px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          gap: '12px'
         }}
       >
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h4
             style={{
               fontSize: '1.05rem',
               fontWeight: 700,
               color: 'var(--text-primary)',
-              marginBottom: '2px'
+              marginBottom: '3px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
             }}
           >
-            {project.title}
+            {item.title}
           </h4>
           <span
             style={{
               fontSize: '0.8rem',
-              color: 'var(--text-secondary)'
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
             }}
           >
-            {project.location ? `📍 ${project.location}` : project.category_name}
+            {item.location ? `📍 ${item.location}` : item.category_name}
+            {item.totalPhotos > 1 && (
+              <span style={{ color: 'var(--gold-primary)', marginLeft: '4px', fontSize: '0.75rem' }}>
+                • View {item.photoNumber}
+              </span>
+            )}
           </span>
         </div>
 
         <div
           style={{
-            width: '32px',
-            height: '32px',
+            width: '34px',
+            height: '34px',
             borderRadius: '50%',
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid var(--border-subtle)',
+            backgroundColor: isHovered ? 'var(--gold-primary)' : 'rgba(255, 255, 255, 0.05)',
+            border: isHovered ? '1px solid var(--gold-primary)' : '1px solid var(--border-subtle)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--gold-primary)'
+            color: isHovered ? '#000' : 'var(--gold-primary)',
+            transition: 'all 0.25s ease',
+            flexShrink: 0
           }}
+          title="Click to view full photo"
         >
-          <Eye size={15} />
+          <Eye size={16} />
         </div>
       </div>
     </div>
@@ -262,18 +216,101 @@ export default function PortfolioSection({
 }) {
   const [activeCategory, setActiveCategory] = useState('all');
 
-  // Filter projects by category dynamically
-  const filteredProjects = activeCategory === 'all'
-    ? projects
-    : projects.filter((p) => {
-        const catSlug = (p.category_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        return (
-          catSlug === activeCategory ||
-          catSlug.includes(activeCategory) ||
-          (p.category_slug && p.category_slug === activeCategory) ||
-          (p.category_id && categories.some(c => c.slug === activeCategory && c.id === p.category_id))
-        );
-      });
+  // Decompose and flatten all projects into individual image showcase cards
+  // This guarantees that all uploaded images appear separately under their respective category
+  const allImageItems = useMemo(() => {
+    const items = [];
+    (projects || []).forEach((proj) => {
+      let imgList = [];
+      try {
+        if (proj.images) {
+          imgList = typeof proj.images === 'string' ? JSON.parse(proj.images) : proj.images;
+        }
+      } catch (e) {
+        imgList = [];
+      }
+
+      if (!Array.isArray(imgList) || imgList.length === 0) {
+        imgList = proj.cover_image ? [proj.cover_image] : ['/uploads/portfolio_spice_hub.jpg'];
+      }
+
+      if (imgList.length <= 1) {
+        items.push({
+          ...proj,
+          displayImage: imgList[0] || proj.cover_image,
+          allImages: imgList,
+          initialImageIndex: 0,
+          totalPhotos: 1,
+          photoNumber: 1,
+          itemKey: `proj-${proj.id || proj.slug}`
+        });
+      } else {
+        // If multiple images are uploaded, show each image separately under the category
+        imgList.forEach((imgUrl, idx) => {
+          items.push({
+            ...proj,
+            displayImage: imgUrl,
+            allImages: imgList,
+            initialImageIndex: idx,
+            totalPhotos: imgList.length,
+            photoNumber: idx + 1,
+            itemKey: `proj-${proj.id || proj.slug}-photo-${idx}`
+          });
+        });
+      }
+    });
+    return items;
+  }, [projects]);
+
+  // Robust, dynamic category matching ensuring newly added categories map correctly
+  const filteredItems = useMemo(() => {
+    if (activeCategory === 'all') {
+      return allImageItems;
+    }
+
+    const activeCatObj = categories.find((c) => c.slug === activeCategory);
+
+    return allImageItems.filter((item) => {
+      // 1. Direct numeric category_id match
+      if (activeCatObj && Number(item.category_id) === Number(activeCatObj.id)) {
+        return true;
+      }
+      // 2. Project category_id matches any category with this slug
+      if (item.category_id && categories.some(c => c.slug === activeCategory && Number(c.id) === Number(item.category_id))) {
+        return true;
+      }
+      // 3. Direct category_slug match
+      if (item.category_slug && item.category_slug === activeCategory) {
+        return true;
+      }
+      // 4. Normalized slugified category_name match
+      const normSlug = (item.category_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      if (normSlug === activeCategory) {
+        return true;
+      }
+      // 5. Exact category name match
+      if (activeCatObj && item.category_name && item.category_name.toLowerCase().trim() === activeCatObj.name.toLowerCase().trim()) {
+        return true;
+      }
+      return false;
+    });
+  }, [allImageItems, activeCategory, categories]);
+
+  // Real-time photo counts per category for the filter pills
+  const categoryCounts = useMemo(() => {
+    const counts = { all: allImageItems.length };
+    categories.forEach((cat) => {
+      if (cat.slug === 'all') return;
+      const count = allImageItems.filter((item) => {
+        if (Number(item.category_id) === Number(cat.id)) return true;
+        if (item.category_slug === cat.slug) return true;
+        const normSlug = (item.category_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        return normSlug === cat.slug || (item.category_name && item.category_name.toLowerCase().trim() === cat.name.toLowerCase().trim());
+      }).length;
+      counts[cat.slug] = count;
+    });
+    return counts;
+  }, [allImageItems, categories]);
 
   return (
     <section
@@ -301,7 +338,7 @@ export default function PortfolioSection({
             <div style={{ marginBottom: '10px' }}>
               <span className="gold-badge" style={{ fontSize: '0.78rem' }}>
                 <Sparkles size={13} color="var(--gold-primary)" />
-                OUR WORK
+                OUR WORK GALLERY
               </span>
             </div>
             <h2
@@ -315,6 +352,9 @@ export default function PortfolioSection({
             >
               Our <span className="text-gold-gradient">Recent</span> Projects
             </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', marginTop: '6px' }}>
+              Browse real client sign board installations, acrylic lettering, and commercial interior branding
+            </p>
           </div>
 
           <button
@@ -322,7 +362,10 @@ export default function PortfolioSection({
             className="btn-outline-gold"
             style={{
               padding: '10px 22px',
-              fontSize: '0.9rem'
+              fontSize: '0.9rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px'
             }}
           >
             <span>Request Custom Design</span>
@@ -344,33 +387,50 @@ export default function PortfolioSection({
         >
           {categories.map((cat) => {
             const isSelected = activeCategory === cat.slug;
+            const count = categoryCounts[cat.slug] ?? 0;
             return (
               <button
                 key={cat.id || cat.slug}
                 onClick={() => setActiveCategory(cat.slug)}
                 style={{
-                  padding: '9px 20px',
+                  padding: '9px 18px',
                   borderRadius: 'var(--radius-full)',
                   border: isSelected ? '1px solid var(--gold-primary)' : '1px solid var(--border-subtle)',
                   backgroundColor: isSelected ? 'var(--gold-primary)' : 'rgba(255, 255, 255, 0.05)',
                   color: isSelected ? '#050505' : 'var(--text-secondary)',
                   fontFamily: 'var(--font-display)',
                   fontWeight: isSelected ? 700 : 500,
-                  fontSize: '0.9rem',
+                  fontSize: '0.88rem',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   transition: 'all 0.2s ease',
-                  boxShadow: isSelected ? 'var(--gold-glow)' : 'none'
+                  boxShadow: isSelected ? 'var(--gold-glow)' : 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}
               >
-                {cat.name}
+                <span>{cat.name}</span>
+                {count > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      backgroundColor: isSelected ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.08)',
+                      padding: '2px 7px',
+                      borderRadius: 'var(--radius-full)'
+                    }}
+                  >
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
-        {/* Projects Grid: Each Project is a Single Card with 1s Multi-Image Auto-Slideshow */}
-        {filteredProjects.length === 0 ? (
+        {/* Gallery Grid: Each uploaded image appears separately */}
+        {filteredItems.length === 0 ? (
           <div
             style={{
               padding: '60px 20px',
@@ -381,10 +441,14 @@ export default function PortfolioSection({
             }}
           >
             <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', marginBottom: '16px' }}>
-              No projects found in this category yet.
+              No images uploaded under this category yet.
             </p>
-            <button onClick={() => setActiveCategory('all')} className="btn-secondary" style={{ padding: '8px 18px', fontSize: '0.86rem' }}>
-              View All Projects
+            <button
+              onClick={() => setActiveCategory('all')}
+              className="btn-secondary"
+              style={{ padding: '8px 18px', fontSize: '0.86rem' }}
+            >
+              View All Photos ({allImageItems.length})
             </button>
           </div>
         ) : (
@@ -395,10 +459,10 @@ export default function PortfolioSection({
               gap: '24px'
             }}
           >
-            {filteredProjects.map((project) => (
-              <ProjectCard
-                key={project.id || project.slug}
-                project={project}
+            {filteredItems.map((item) => (
+              <PortfolioItemCard
+                key={item.itemKey}
+                item={item}
                 onSelectProject={onSelectProject}
               />
             ))}

@@ -211,8 +211,8 @@ app.get('/api/public/projects', (req, res) => {
   let query = 'SELECT * FROM projects';
   const params = [];
   if (category && category !== 'all') {
-    query += ' WHERE category_name LIKE ? OR category_id IN (SELECT id FROM portfolio_categories WHERE slug = ?)';
-    params.push(`%${category}%`, category);
+    query += ' WHERE category_name LIKE ? OR category_id IN (SELECT id FROM portfolio_categories WHERE slug = ? OR name LIKE ?)';
+    params.push(`%${category}%`, category, `%${category}%`);
   }
   query += ' ORDER BY display_order ASC, id DESC';
   const projects = db.prepare(query).all(...params);
@@ -995,6 +995,156 @@ app.delete('/api/admin/projects/:id', authenticateAdmin, (req, res) => {
   res.json({ success: true, message: 'Project deleted' });
 });
 
+// Batch Upload and Create Multiple Projects under a Category
+app.post('/api/admin/projects/upload-batch', authenticateAdmin, (req, res) => {
+  upload.array('images', 30)(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    try {
+      const categoryId = parseInt(req.body.category_id, 10);
+      if (!categoryId) {
+        return res.status(400).json({ error: 'category_id is required' });
+      }
+      const cat = db.prepare('SELECT id, name FROM portfolio_categories WHERE id = ?').get(categoryId);
+      if (!cat) {
+        return res.status(404).json({ error: 'Category not found' });
+      }
+
+      const files = req.files || [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: 'No image files uploaded' });
+      }
+
+      const baseTitle = (req.body.title || '').trim();
+      const location = (req.body.location || 'Jamshedpur').trim();
+      const projectDate = (req.body.project_date || '2026').trim();
+
+      const insertMedia = db.prepare(`
+        INSERT INTO media (file_name, file_url, file_type, file_size, alt_text)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+
+      const insertProj = db.prepare(`
+        INSERT INTO projects (slug, title, category_id, category_name, location, short_description, full_description, project_date, cover_image, images, is_featured, display_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const createdProjects = [];
+      const batchTx = db.transaction(() => {
+        files.forEach((file, idx) => {
+          const fileUrl = `/uploads/${file.filename}`;
+          // Register in media library
+          insertMedia.run(file.filename, fileUrl, file.mimetype, file.size, `${cat.name} Showcase`);
+
+          // Project title
+          let itemTitle = baseTitle
+            ? (files.length > 1 ? `${baseTitle} - Image ${idx + 1}` : baseTitle)
+            : `${cat.name} Project ${idx + 1}`;
+
+          const slug = `proj-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`;
+          const imgJson = JSON.stringify([fileUrl]);
+
+          const result = insertProj.run(
+            slug,
+            itemTitle,
+            cat.id,
+            cat.name,
+            location,
+            `${cat.name} project installed in ${location}`,
+            '',
+            projectDate,
+            fileUrl,
+            imgJson,
+            1,
+            idx + 1
+          );
+
+          const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid);
+          proj.images = [fileUrl];
+          createdProjects.push(proj);
+        });
+      });
+
+      batchTx();
+
+      res.status(201).json({
+        success: true,
+        message: `${createdProjects.length} images uploaded and published under '${cat.name}'`,
+        count: createdProjects.length,
+        data: createdProjects
+      });
+    } catch (error) {
+      console.error('Batch upload error:', error);
+      res.status(500).json({ error: error.message || 'Failed to upload batch images' });
+    }
+  });
+});
+
+// JSON Batch Create Projects
+app.post('/api/admin/projects/batch', authenticateAdmin, (req, res) => {
+  try {
+    const { category_id, items } = req.body;
+    if (!category_id) {
+      return res.status(400).json({ error: 'category_id is required' });
+    }
+    const cat = db.prepare('SELECT id, name FROM portfolio_categories WHERE id = ?').get(category_id);
+    if (!cat) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'items array is required' });
+    }
+
+    const insertStmt = db.prepare(`
+      INSERT INTO projects (slug, title, category_id, category_name, location, short_description, full_description, project_date, cover_image, images, is_featured, display_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const createdIds = [];
+    const insertMany = db.transaction((rows) => {
+      rows.forEach((row, idx) => {
+        const title = row.title || `${cat.name} Showcase ${idx + 1}`;
+        const slug = `proj-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`;
+        const cover_image = row.cover_image || (row.images && row.images[0]) || '/uploads/hero_storefront.jpg';
+        const imgArr = Array.isArray(row.images) && row.images.length > 0 ? row.images : [cover_image];
+        const resInsert = insertStmt.run(
+          slug,
+          title,
+          cat.id,
+          cat.name,
+          row.location || 'Local',
+          row.short_description || '',
+          row.full_description || '',
+          row.project_date || '2026',
+          cover_image,
+          JSON.stringify(imgArr),
+          row.is_featured ? 1 : 0,
+          row.display_order || 0
+        );
+        createdIds.push(resInsert.lastInsertRowid);
+      });
+    });
+
+    insertMany(items);
+
+    const createdProjects = db.prepare(`SELECT * FROM projects WHERE id IN (${createdIds.map(() => '?').join(',')})`).all(...createdIds);
+    createdProjects.forEach(p => {
+      try {
+        p.images = p.images ? JSON.parse(p.images) : [p.cover_image];
+      } catch (e) {
+        p.images = [p.cover_image];
+      }
+    });
+
+    res.status(201).json({ success: true, count: createdProjects.length, data: createdProjects });
+  } catch (error) {
+    console.error('Batch project error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create projects batch' });
+  }
+});
+
 // Categories CRUD
 app.get('/api/admin/categories', authenticateAdmin, (req, res) => {
   const categories = db.prepare(`
@@ -1203,21 +1353,27 @@ app.get('/api/admin/media', authenticateAdmin, (req, res) => {
   res.json({ success: true, data: mediaList });
 });
 
-app.post('/api/admin/media/upload', authenticateAdmin, upload.single('image'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No image file uploaded' });
-  }
+app.post('/api/admin/media/upload', authenticateAdmin, (req, res) => {
+  upload.any()(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Image upload failed' });
+    }
+    const file = (req.files && req.files[0]) || req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No image file uploaded' });
+    }
 
-  const fileUrl = `/uploads/${req.file.filename}`;
-  const altText = req.body.alt_text || req.file.originalname;
+    const fileUrl = `/uploads/${file.filename}`;
+    const altText = req.body.alt_text || file.originalname;
 
-  const result = db.prepare(`
-    INSERT INTO media (file_name, file_url, file_type, file_size, alt_text)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(req.file.filename, fileUrl, req.file.mimetype, req.file.size, altText);
+    const result = db.prepare(`
+      INSERT INTO media (file_name, file_url, file_type, file_size, alt_text)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(file.filename, fileUrl, file.mimetype, file.size, altText);
 
-  const mediaItem = db.prepare('SELECT * FROM media WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json({ success: true, data: mediaItem });
+    const mediaItem = db.prepare('SELECT * FROM media WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json({ success: true, data: mediaItem });
+  });
 });
 
 app.delete('/api/admin/media/:id', authenticateAdmin, (req, res) => {

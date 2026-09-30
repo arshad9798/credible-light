@@ -395,6 +395,30 @@ export default function QuoteSection({ services = [], settings = {}, preselected
                 />
               </div>
 
+              {/* Requirement Details / Notes */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  Project Requirements / Custom Notes (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Backlit 3D acrylic letters for new shop front, warm white LED illumination, ACP cladding sheet..."
+                  value={formData.requirement_details}
+                  onChange={(e) => setFormData({ ...formData, requirement_details: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.9rem',
+                    outline: 'none',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
               {/* Submit CTA Button */}
               <button
                 type="submit"

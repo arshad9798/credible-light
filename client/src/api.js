@@ -125,6 +125,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
+  updateEnquiryStatus: (id, status, admin_notes, follow_up_date) => request(`/admin/enquiries/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, admin_notes, follow_up_date })
+  }),
   deleteEnquiry: (id) => request(`/admin/enquiries/${id}`, { method: 'DELETE' }),
 
   // Admin Services
@@ -136,6 +140,8 @@ export const api = {
   // Admin Projects
   getProjectsAdmin: () => request('/admin/projects'),
   createProject: (data) => request('/admin/projects', { method: 'POST', body: JSON.stringify(data) }),
+  createProjectsBatch: (data) => request('/admin/projects/batch', { method: 'POST', body: JSON.stringify(data) }),
+  uploadBatchProjects: (formData) => request('/admin/projects/upload-batch', { method: 'POST', body: formData }),
   updateProject: (id, data) => request(`/admin/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id) => request(`/admin/projects/${id}`, { method: 'DELETE' }),
 

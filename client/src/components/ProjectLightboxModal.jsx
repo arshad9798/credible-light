@@ -8,7 +8,7 @@ export default function ProjectLightboxModal({ project, onClose, onQuote, settin
     ? project.images
     : [project.cover_image];
 
-  const [activeImgIdx, setActiveImgIdx] = useState(0);
+  const [activeImgIdx, setActiveImgIdx] = useState(project.initialImageIndex || 0);
 
   const waNumber = (settings.whatsapp_number || '+91 87896 40490').replace(/[^0-9]/g, '');
   const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(
